@@ -7,6 +7,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/autoscaling"
 	"github.com/aws/aws-sdk-go/service/ec2"
 )
 
@@ -15,8 +16,8 @@ type SecurityGroup struct {
 	GroupID string
 }
 
-//OrchestratorManagement struct
-type OrchestratorManagement struct {
+// Orchestrator struct
+type Orchestrator struct {
 	SecurityGroup
 	Region, VpcID string
 	ec2           *ec2.EC2
@@ -24,17 +25,18 @@ type OrchestratorManagement struct {
 
 //OrchestratorBuilder service
 type OrchestratorBuilder struct {
-	OrchestratorManagement
+	Orchestrator
 }
 
 //Build method
-func (ob *OrchestratorBuilder) Build() OrchestratorManagement {
-	return ob.OrchestratorManagement
+func (ob *OrchestratorBuilder) Build() Orchestrator {
+	return ob.Orchestrator
+
 }
 
 //Region method
 func (ob *OrchestratorBuilder) Region(region string) *OrchestratorBuilder {
-	ob.OrchestratorManagement.Region = region
+	ob.Orchestrator.Region = region
 	return ob
 }
 
@@ -43,40 +45,100 @@ func (ob *OrchestratorBuilder) EnableEc2() *OrchestratorBuilder {
 
 	sess := session.Must(session.NewSessionWithOptions(session.Options{
 		SharedConfigState: session.SharedConfigEnable,
-		Config:            aws.Config{Region: aws.String(ob.OrchestratorManagement.Region)},
+		Config:            aws.Config{Region: aws.String(ob.Orchestrator.Region)},
 	}))
 
 	ec2 := ec2.New(sess)
-	ob.OrchestratorManagement.ec2 = ec2
+	ob.Orchestrator.ec2 = ec2
 	return ob
 }
 
 //AdquireVpc method
 func (ob *OrchestratorBuilder) AdquireVpc() *OrchestratorBuilder {
-	result, _ := ob.OrchestratorManagement.ec2.DescribeVpcs(nil)
+	result, _ := ob.Orchestrator.ec2.DescribeVpcs(nil)
 	if len(result.Vpcs) == 0 {
 		fmt.Fprintf(os.Stderr, "No Vpc found")
 		os.Exit(1)
 	}
-	ob.OrchestratorManagement.VpcID = aws.StringValue(result.Vpcs[0].VpcId)
+	ob.Orchestrator.VpcID = aws.StringValue(result.Vpcs[0].VpcId)
 	return ob
 }
 
 //CreateSecurityGroupConfiguration method
 func (ob *OrchestratorBuilder) CreateSecurityGroupConfiguration(name string, description string, vpcID string) *OrchestratorBuilder {
-	securityGroup, err := ob.OrchestratorManagement.ec2.CreateSecurityGroup(&ec2.CreateSecurityGroupInput{
+
+	ob.FindSecurityGroup(name)
+
+	if len(ob.Orchestrator.SecurityGroup.GroupID) > 0 {
+		return ob
+	}
+	securityGroup, err := ob.Orchestrator.ec2.CreateSecurityGroup(&ec2.CreateSecurityGroupInput{
 		GroupName:   aws.String(name),
 		Description: aws.String(description),
 		VpcId:       aws.String(vpcID),
 	})
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to create security group: %s %v", name, err)
+		message := "Unable to create security group: " + name
+		printError(message, err)
 		os.Exit(1)
 	}
 
-	ob.OrchestratorManagement.SecurityGroup.GroupID = *securityGroup.GroupId
+	ob.Orchestrator.SecurityGroup.GroupID = *securityGroup.GroupId
 	return ob
+}
+
+//FindSecurityGroup method
+func (ob *OrchestratorBuilder) FindSecurityGroup(securityGroupName string) *OrchestratorBuilder {
+	response, err := ob.Orchestrator.ec2.DescribeSecurityGroups(&ec2.DescribeSecurityGroupsInput{
+		Filters: []*ec2.Filter{
+			{
+				Name: aws.String("name"),
+				Values: []*string{
+					aws.String(securityGroupName),
+				},
+			},
+		},
+	})
+
+	if err != nil {
+		message := "error describing SecurityGroup" + securityGroupName
+		printError(message, err)
+		return nil
+	}
+
+	if len(response.SecurityGroups) == 0 {
+		return nil
+	}
+
+	securityGroup := response.SecurityGroups[0]
+	ob.Orchestrator.SecurityGroup.GroupID = *securityGroup.GroupId
+
+	return ob
+}
+
+//InputSecurityRule method
+func (ob *OrchestratorBuilder) InputSecurityRule(groupName string) *OrchestratorBuilder {
+	_, err := ob.Orchestrator.ec2.AuthorizeSecurityGroupIngress(&ec2.AuthorizeSecurityGroupIngressInput{
+		GroupName: aws.String(groupName),
+		IpPermissions: []*ec2.IpPermission{
+			(&ec2.IpPermission{}).
+				SetIpProtocol("tcp").
+				SetFromPort(80).
+				SetToPort(80).
+				SetIpRanges([]*ec2.IpRange{
+					{CidrIp: aws.String("0.0.0.0/0")},
+				}),
+		},
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Cannot add security rules in: %s  error:%v", groupName, err)
+	}
+	return ob
+}
+
+func createLaunchConfiguration(awsAutoScalingService *autoscaling.AutoScaling) {
+	fmt.Println("something")
 }
 
 func printError(message string, e error) {

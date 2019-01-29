@@ -15,7 +15,8 @@ func main() {
 		Region(region).
 		EnableEc2().
 		AdquireVpc().
-		CreateSecurityGroupConfiguration("app-platform", "app platform security group", ob.OrchestratorManagement.VpcID).
+		CreateSecurityGroupConfiguration("app-platform", "app platform security group", ob.Orchestrator.VpcID).
+		InputSecurityRule(ob.Orchestrator.SecurityGroup.GroupID).
 		Build()
 
 	fmt.Println(awsServiceMangment)
