@@ -18,12 +18,6 @@ func main() {
 		CreateSecurityGroupConfiguration("app-platform", "app platform security group", ob.OrchestratorManagement.VpcID).
 		Build()
 
-	/*
-		user := ub.
-			Name("Michael Scott").
-			Role("manager").
-			Build()
-	*/
 	fmt.Println(awsServiceMangment)
 }
 
