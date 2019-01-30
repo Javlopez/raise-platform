@@ -2,7 +2,7 @@
 
 
 [[projects]]
-  digest = "1:0495c1d0decbc1dc34e5f109b0e6aa7423f2fb780f5b3a9a7cf4ca5d5472a2d1"
+  digest = "1:b186475c596c7f60778aa2aa9a7562332a5a1663f0814360b306dc640cf41ed0"
   name = "github.com/aws/aws-sdk-go"
   packages = [
     "aws",
@@ -34,7 +34,9 @@
     "private/protocol/query/queryutil",
     "private/protocol/rest",
     "private/protocol/xml/xmlutil",
+    "service/autoscaling",
     "service/ec2",
+    "service/elb",
     "service/sts",
   ]
   pruneopts = "UT"
@@ -53,8 +55,11 @@
   analyzer-version = 1
   input-imports = [
     "github.com/aws/aws-sdk-go/aws",
+    "github.com/aws/aws-sdk-go/aws/awserr",
     "github.com/aws/aws-sdk-go/aws/session",
+    "github.com/aws/aws-sdk-go/service/autoscaling",
     "github.com/aws/aws-sdk-go/service/ec2",
+    "github.com/aws/aws-sdk-go/service/elb",
   ]
   solver-name = "gps-cdcl"
   solver-version = 1
