@@ -350,7 +350,6 @@ func (ob *OrchestratorBuilder) DeployAutoScalingGroup(name string, minSize int64
 		LaunchConfigurationName: aws.String(ob.Orchestrator.LaunchConfiguration.Name),
 		MaxSize:                 aws.Int64(maxSize),
 		MinSize:                 aws.Int64(minSize),
-		DesiredCapacity:         aws.Int64(1),
 		VPCZoneIdentifier:       aws.String(ob.Orchestrator.Subnet.ID),
 		HealthCheckGracePeriod:  aws.Int64(120),
 		HealthCheckType:         aws.String("ELB"),
@@ -361,14 +360,31 @@ func (ob *OrchestratorBuilder) DeployAutoScalingGroup(name string, minSize int64
 
 	_, err := autoScalingAws.CreateAutoScalingGroup(input)
 
-	ob.Orchestrator.AutoscalingGroup.MaxSize = maxSize
-	ob.Orchestrator.AutoscalingGroup.MinSize = minSize
-	ob.Orchestrator.AutoscalingGroup.Name = name
-
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
 			switch aerr.Code() {
 			case autoscaling.ErrCodeAlreadyExistsFault:
+
+				inputUpdate := &autoscaling.UpdateAutoScalingGroupInput{
+					AutoScalingGroupName:    aws.String(name),
+					LaunchConfigurationName: aws.String(ob.Orchestrator.LaunchConfiguration.Name),
+					MaxSize:                 aws.Int64(maxSize),
+					MinSize:                 aws.Int64(minSize),
+					VPCZoneIdentifier:       aws.String(ob.Orchestrator.Subnet.ID),
+					HealthCheckGracePeriod:  aws.Int64(120),
+					HealthCheckType:         aws.String("ELB"),
+				}
+
+				_, err := autoScalingAws.UpdateAutoScalingGroup(inputUpdate)
+
+				if err != nil {
+					message := "Cannot be update the autoscaling group:" + name
+					printError(message, err)
+				}
+				ob.Orchestrator.AutoscalingGroup.MaxSize = maxSize
+				ob.Orchestrator.AutoscalingGroup.MinSize = minSize
+				ob.Orchestrator.AutoscalingGroup.Name = name
+
 				PrintMessage("AutoScaling: " + name + " has been deployed ")
 				return ob
 			default:
@@ -378,6 +394,9 @@ func (ob *OrchestratorBuilder) DeployAutoScalingGroup(name string, minSize int64
 		}
 	}
 
+	ob.Orchestrator.AutoscalingGroup.MaxSize = maxSize
+	ob.Orchestrator.AutoscalingGroup.MinSize = minSize
+	ob.Orchestrator.AutoscalingGroup.Name = name
 	PrintMessage("AutoScaling: " + name + " has been deployed ")
 	return ob
 }
