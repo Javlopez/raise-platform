@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -41,6 +42,11 @@ type LoadBalancer struct {
 	Name string
 }
 
+//InstancesCollection struct
+type InstancesCollection struct {
+	Instances []*ec2.Reservation
+}
+
 // Orchestrator struct
 type Orchestrator struct {
 	Subnet
@@ -51,6 +57,7 @@ type Orchestrator struct {
 	AutoscalingGroup
 	LoadBalancer
 	session *session.Session
+	InstancesCollection
 }
 
 //OrchestratorBuilder service
@@ -338,7 +345,6 @@ func (ob *OrchestratorBuilder) CreateLaunchConfiguration(imageID string, instanc
 
 	PrintMessage("Launch Configuration:" + launchConfigurationName + " Created ")
 	return ob
-
 }
 
 // DeployAutoScalingGroup method
@@ -401,12 +407,41 @@ func (ob *OrchestratorBuilder) DeployAutoScalingGroup(name string, minSize int64
 	return ob
 }
 
-func printError(message string, e error) {
-	fmt.Println(message, e.Error())
-	log.Fatal(e.Error())
+//FindInstancesByAMI method
+func (ob *OrchestratorBuilder) FindInstancesByAMI(ami string) *OrchestratorBuilder {
+
+	PrintMessage("Looking instances with AMI: " + ami)
+	inputParams := &ec2.DescribeInstancesInput{
+		Filters: []*ec2.Filter{
+			{
+				Name: aws.String("image-id"),
+				Values: []*string{
+					aws.String(ami),
+				},
+			},
+		},
+	}
+
+	result, err := ob.Orchestrator.ec2.DescribeInstances(inputParams)
+
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	instances := strconv.Itoa(len(result.Reservations))
+	PrintMessage(instances + " instances were founded....")
+
+	ob.Orchestrator.InstancesCollection.Instances = result.Reservations
+
+	return ob
 }
 
 //PrintMessage func
 func PrintMessage(message string) {
-	fmt.Printf("%10v%10v\n", message, " ")
+	fmt.Printf("%v\n", message)
+}
+
+func printError(message string, e error) {
+	fmt.Println(message, e.Error())
+	log.Fatal(e.Error())
 }
