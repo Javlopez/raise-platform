@@ -31,7 +31,9 @@ type Subnet struct {
 
 //AutoscalingGroup struct
 type AutoscalingGroup struct {
-	Name string
+	Name    string
+	MaxSize int64
+	MinSize int64
 }
 
 //LoadBalancer struct
@@ -48,6 +50,7 @@ type Orchestrator struct {
 	LaunchConfiguration
 	AutoscalingGroup
 	LoadBalancer
+	session *session.Session
 }
 
 //OrchestratorBuilder service
@@ -61,39 +64,50 @@ func (ob *OrchestratorBuilder) Build() Orchestrator {
 
 }
 
-//Region method
-func (ob *OrchestratorBuilder) Region(region string) *OrchestratorBuilder {
+//NewSession method
+func (ob *OrchestratorBuilder) NewSession(region string) *OrchestratorBuilder {
 	ob.Orchestrator.Region = region
+	sess := session.Must(session.NewSessionWithOptions(session.Options{
+		SharedConfigState: session.SharedConfigEnable,
+		Config:            aws.Config{Region: aws.String(ob.Orchestrator.Region)},
+	}))
+
+	PrintMessage("Starting new session with Amazon AWS Region " + ob.Orchestrator.Region)
+	ob.Orchestrator.session = sess
 	return ob
 }
 
 //EnableEc2 method
 func (ob *OrchestratorBuilder) EnableEc2() *OrchestratorBuilder {
 
-	sess := session.Must(session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable,
-		Config:            aws.Config{Region: aws.String(ob.Orchestrator.Region)},
-	}))
-
-	ec2 := ec2.New(sess)
+	ec2 := ec2.New(ob.Orchestrator.session)
 	ob.Orchestrator.ec2 = ec2
+	PrintMessage("Enabling EC2 service")
 	return ob
 }
 
-//AdquireVpc method
-func (ob *OrchestratorBuilder) AdquireVpc() *OrchestratorBuilder {
+//CreateVpc method
+func (ob *OrchestratorBuilder) CreateVpc() *OrchestratorBuilder {
 	result, _ := ob.Orchestrator.ec2.DescribeVpcs(nil)
 	if len(result.Vpcs) == 0 {
 		fmt.Fprintf(os.Stderr, "No Vpc found")
 		os.Exit(1)
 	}
 
+	PrintMessage("Loading VPC ID: " + *result.Vpcs[0].VpcId)
 	ob.Orchestrator.VpcID = aws.StringValue(result.Vpcs[0].VpcId)
 	return ob
 }
 
 //CreateSubnet method
 func (ob *OrchestratorBuilder) CreateSubnet(cidr string) *OrchestratorBuilder {
+
+	if ob.FindSubnet() {
+		message := "Subnet " + ob.Orchestrator.Subnet.ID + " CIDR: " + cidr + " was created in VPC: " + ob.Orchestrator.VpcID
+		PrintMessage(message)
+		return ob
+	}
+
 	inputSubnet := &ec2.CreateSubnetInput{
 		CidrBlock: aws.String(cidr),
 		VpcId:     aws.String(ob.Orchestrator.VpcID),
@@ -105,16 +119,48 @@ func (ob *OrchestratorBuilder) CreateSubnet(cidr string) *OrchestratorBuilder {
 		aerr, _ := err.(awserr.Error)
 
 		if aerr.Code() == "InvalidSubnet.Conflict" {
+			message := "Subnet " + ob.Orchestrator.Subnet.ID + " CIDR: " + cidr + " was loaded in VPC: " + ob.Orchestrator.VpcID
+			PrintMessage(message)
 			return ob
 		}
-		message := "Cannot to create a subnet with CIDR: " + cidr
-		printError(message, err)
+		errMessage := "Cannot to create a subnet with CIDR: " + cidr
+		printError(errMessage, err)
 		return nil
 	}
 
 	ob.Orchestrator.Subnet.ID = *result.Subnet.SubnetId
+	message := "Subnet " + ob.Orchestrator.Subnet.ID + "CIDR: " + cidr + " was created in VPC: " + ob.Orchestrator.VpcID
+	PrintMessage(message)
 
 	return ob
+}
+
+//FindSubnet method
+func (ob *OrchestratorBuilder) FindSubnet() bool {
+
+	params := &ec2.DescribeSubnetsInput{
+		Filters: []*ec2.Filter{
+			{
+				Name: aws.String("vpc-id"),
+				Values: []*string{
+					aws.String(ob.Orchestrator.VpcID),
+				},
+			},
+		},
+	}
+
+	result, err := ob.ec2.DescribeSubnets(params)
+	if err != nil {
+		printError("We cannot describe the subnets", err)
+	}
+
+	if len(result.Subnets) == 0 {
+		return false
+	}
+
+	subnet := result.Subnets[0]
+	ob.Orchestrator.Subnet.ID = *subnet.SubnetId
+	return true
 }
 
 //CreateSecurityGroupConfiguration method
@@ -123,6 +169,8 @@ func (ob *OrchestratorBuilder) CreateSecurityGroupConfiguration(name string, des
 	ob.FindSecurityGroup(name)
 
 	if len(ob.Orchestrator.SecurityGroup.GroupID) > 0 {
+		message := "The security group:" + name + " with ID " + ob.Orchestrator.SecurityGroup.GroupID + " was loaded"
+		PrintMessage(message)
 		return ob
 	}
 	securityGroup, err := ob.Orchestrator.ec2.CreateSecurityGroup(&ec2.CreateSecurityGroupInput{
@@ -139,6 +187,9 @@ func (ob *OrchestratorBuilder) CreateSecurityGroupConfiguration(name string, des
 
 	ob.Orchestrator.SecurityGroup.GroupID = *securityGroup.GroupId
 	ob.Orchestrator.SecurityGroup.GroupName = name
+
+	message := "The security group:" + name + " ID " + ob.Orchestrator.SecurityGroup.GroupID + " was created"
+	PrintMessage(message)
 	return ob
 }
 
@@ -190,20 +241,23 @@ func (ob *OrchestratorBuilder) InputSecurityRule(groupName string) *Orchestrator
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
 			if aerr.Code() == "InvalidPermission.Duplicate" {
+				PrintMessage("The security Rule was already added into security group:" + ob.Orchestrator.SecurityGroup.GroupID)
 				return ob
 			}
 
-			message := "Cannot add security rules in: " + groupName
-			printError(message, err)
+			errMessage := "Cannot add security rules in: " + groupName
+			printError(errMessage, err)
 		}
 	}
+
+	PrintMessage("The security rule was added into security group" + ob.Orchestrator.SecurityGroup.GroupID)
 	return ob
 }
 
 //CreateLoadBalancer CreateLoadBalancer
 func (ob *OrchestratorBuilder) CreateLoadBalancer(elbName string, instancePort int64, loadBalancerPort int64) *OrchestratorBuilder {
 
-	elbService := elb.New(session.New())
+	elbService := elb.New(ob.Orchestrator.session)
 	input := &elb.CreateLoadBalancerInput{
 		Listeners: []*elb.Listener{
 			{
@@ -223,10 +277,15 @@ func (ob *OrchestratorBuilder) CreateLoadBalancer(elbName string, instancePort i
 	}
 
 	_, err := elbService.CreateLoadBalancer(input)
+
+	ob.Orchestrator.LoadBalancer.Name = elbName
+
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
 			switch aerr.Code() {
 			case elb.ErrCodeDuplicateAccessPointNameException:
+				PrintMessage("Loading ELB: " + elbName)
+				return ob
 			default:
 				message := "Error creating ELB : " + elbName
 				printError(message, err)
@@ -236,20 +295,14 @@ func (ob *OrchestratorBuilder) CreateLoadBalancer(elbName string, instancePort i
 		printError(message, err)
 	}
 
-	ob.Orchestrator.LoadBalancer.Name = elbName
-
+	PrintMessage("ELB: " + elbName + " created")
 	return ob
 }
 
 //CreateLaunchConfiguration method
 func (ob *OrchestratorBuilder) CreateLaunchConfiguration(imageID string, instanceType string, launchConfigurationName string) *OrchestratorBuilder {
 
-	sess := session.Must(session.NewSessionWithOptions(session.Options{
-		SharedConfigState: session.SharedConfigEnable,
-		Config:            aws.Config{Region: aws.String(ob.Orchestrator.Region)},
-	}))
-
-	autoScalingAws := autoscaling.New(sess)
+	autoScalingAws := autoscaling.New(ob.Orchestrator.session)
 
 	inputParams := &autoscaling.CreateLaunchConfigurationInput{
 		ImageId:                 aws.String(imageID),
@@ -262,38 +315,42 @@ func (ob *OrchestratorBuilder) CreateLaunchConfiguration(imageID string, instanc
 
 	_, err := autoScalingAws.CreateLaunchConfiguration(inputParams)
 
+	ob.Orchestrator.LaunchConfiguration.Name = launchConfigurationName
+
 	if err != nil {
 
 		if err != nil {
 			if aerr, ok := err.(awserr.Error); ok {
 				switch aerr.Code() {
 				case autoscaling.ErrCodeAlreadyExistsFault:
+					PrintMessage("Load Launch configuration:" + launchConfigurationName)
 					return ob
 				default:
-					message := "Cannot be create the autoscaling group:" + launchConfigurationName
-					printError(message, err)
+					errMessage := "Cannot be create the autoscaling group:" + launchConfigurationName
+					printError(errMessage, err)
 				}
 			}
 		}
 
-		message := "Error creating launch configuration: " + launchConfigurationName
-		printError(message, err)
+		errMessage := "Error creating launch configuration: " + launchConfigurationName
+		printError(errMessage, err)
 	}
 
-	ob.Orchestrator.LaunchConfiguration.Name = launchConfigurationName
+	PrintMessage("Launch Configuration:" + launchConfigurationName + " Created ")
 	return ob
 
 }
 
-// CreateAutoScalingGroup method
-func (ob *OrchestratorBuilder) CreateAutoScalingGroup(name string, minSize int64, maxSize int64) *OrchestratorBuilder {
+// DeployAutoScalingGroup method
+func (ob *OrchestratorBuilder) DeployAutoScalingGroup(name string, minSize int64, maxSize int64) *OrchestratorBuilder {
 
-	autoScalingAws := autoscaling.New(session.New())
+	autoScalingAws := autoscaling.New(ob.Orchestrator.session)
 	input := &autoscaling.CreateAutoScalingGroupInput{
 		AutoScalingGroupName:    aws.String(name),
 		LaunchConfigurationName: aws.String(ob.Orchestrator.LaunchConfiguration.Name),
 		MaxSize:                 aws.Int64(maxSize),
 		MinSize:                 aws.Int64(minSize),
+		DesiredCapacity:         aws.Int64(1),
 		VPCZoneIdentifier:       aws.String(ob.Orchestrator.Subnet.ID),
 		HealthCheckGracePeriod:  aws.Int64(120),
 		HealthCheckType:         aws.String("ELB"),
@@ -302,12 +359,17 @@ func (ob *OrchestratorBuilder) CreateAutoScalingGroup(name string, minSize int64
 		},
 	}
 
-	result, err := autoScalingAws.CreateAutoScalingGroup(input)
+	_, err := autoScalingAws.CreateAutoScalingGroup(input)
+
+	ob.Orchestrator.AutoscalingGroup.MaxSize = maxSize
+	ob.Orchestrator.AutoscalingGroup.MinSize = minSize
+	ob.Orchestrator.AutoscalingGroup.Name = name
 
 	if err != nil {
 		if aerr, ok := err.(awserr.Error); ok {
 			switch aerr.Code() {
 			case autoscaling.ErrCodeAlreadyExistsFault:
+				PrintMessage("AutoScaling: " + name + " has been deployed ")
 				return ob
 			default:
 				message := "Cannot be create the autoscaling group:" + name
@@ -316,13 +378,16 @@ func (ob *OrchestratorBuilder) CreateAutoScalingGroup(name string, minSize int64
 		}
 	}
 
-	fmt.Println(result)
-	return nil
-
+	PrintMessage("AutoScaling: " + name + " has been deployed ")
 	return ob
 }
 
 func printError(message string, e error) {
 	fmt.Println(message, e.Error())
 	log.Fatal(e.Error())
+}
+
+//PrintMessage func
+func PrintMessage(message string) {
+	fmt.Printf("%10v%10v\n", message, " ")
 }
