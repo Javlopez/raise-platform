@@ -94,8 +94,19 @@ func (ob *OrchestratorBuilder) EnableEc2() *OrchestratorBuilder {
 }
 
 //CreateVpc method
-func (ob *OrchestratorBuilder) CreateVpc() *OrchestratorBuilder {
-	result, _ := ob.Orchestrator.ec2.DescribeVpcs(nil)
+func (ob *OrchestratorBuilder) CreateVpc(PreviousVpcID ...string) *OrchestratorBuilder {
+
+	VpcID := &ec2.DescribeVpcsInput{}
+
+	if len(PreviousVpcID) > 0 {
+		VpcID = &ec2.DescribeVpcsInput{
+			VpcIds: []*string{
+				aws.String(PreviousVpcID[0]),
+			},
+		}
+	}
+
+	result, _ := ob.Orchestrator.ec2.DescribeVpcs(VpcID)
 	if len(result.Vpcs) == 0 {
 		fmt.Fprintf(os.Stderr, "No Vpc found")
 		os.Exit(1)
@@ -444,4 +455,69 @@ func PrintMessage(message string) {
 func printError(message string, e error) {
 	fmt.Println(message, e.Error())
 	log.Fatal(e.Error())
+}
+
+//GetAutoScalingGroups method
+func GetAutoScalingGroups(ob *OrchestratorBuilder, name string) *autoscaling.DescribeAutoScalingGroupsOutput {
+
+	autoScalingAws := autoscaling.New(ob.Orchestrator.session)
+
+	input := &autoscaling.DescribeAutoScalingGroupsInput{
+		AutoScalingGroupNames: []*string{
+			aws.String(name),
+		},
+	}
+
+	result, err := autoScalingAws.DescribeAutoScalingGroups(input)
+	if err != nil {
+		printError("We cannot found any Autoscaling group with name "+name, err)
+	}
+
+	return result
+}
+
+//LoadLaunchConfig func
+func LoadLaunchConfig(ob *OrchestratorBuilder, name string) *autoscaling.DescribeLaunchConfigurationsOutput {
+
+	autoScalingAws := autoscaling.New(ob.Orchestrator.session)
+
+	input := &autoscaling.DescribeLaunchConfigurationsInput{
+		LaunchConfigurationNames: []*string{
+			aws.String(name),
+		},
+	}
+
+	result, err := autoScalingAws.DescribeLaunchConfigurations(input)
+	if err != nil {
+		printError("We cannot found any Launch Configuration with name "+name, err)
+	}
+
+	if len(result.LaunchConfigurations) == 0 {
+		return nil
+	}
+
+	return result
+}
+
+//UpdateAutoScalingGroup func
+func UpdateAutoScalingGroup(ob *OrchestratorBuilder, autoScalingGroupName string, launchConfigurationName string) {
+
+	autoScalingAws := autoscaling.New(ob.Orchestrator.session)
+
+	inputUpdate := &autoscaling.UpdateAutoScalingGroupInput{
+		AutoScalingGroupName:    aws.String(autoScalingGroupName),
+		LaunchConfigurationName: aws.String(launchConfigurationName),
+		HealthCheckGracePeriod:  aws.Int64(120),
+		HealthCheckType:         aws.String("ELB"),
+	}
+
+	_, err := autoScalingAws.UpdateAutoScalingGroup(inputUpdate)
+
+	if err != nil {
+		message := "Cannot be update the autoscaling group:" + autoScalingGroupName
+		printError(message, err)
+	}
+
+	PrintMessage("The Launch Configuration was deployed and now all the instances are been updated")
+
 }
