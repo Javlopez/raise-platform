@@ -51,7 +51,7 @@ docker run --entrypoint /bin/bash -it app-platform
     - This is the type of execution thst will be execute
         - plan: Just show a summary of the changes
         - execute: The plan will be executed
-        
+
  - --ami=ami-0ca6dfcefdde35d25
     - AMI id required to build the launch configuration
 
@@ -78,3 +78,9 @@ docker run --entrypoint /bin/bash -it app-platform
 
  - --autoscaling-group-name=app-platform
     - Name of AutoScaling Group Name
+
+-  --elb-instance-port=80
+    - Port of the instance 
+
+-  --elb-load-balancer-port=80
+    - Port of the load balancer  

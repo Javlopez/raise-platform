@@ -4,6 +4,7 @@ import (
 	"app-platform/internals/aws"
 	"flag"
 	"fmt"
+	"strconv"
 )
 
 func main() {
@@ -18,6 +19,8 @@ func main() {
 	cidr := flag.String("cidr", "172.31.0.0/20", "CIDR block")
 	autoScalingName := flag.String("autoscaling-group-name", "app-platform", "Name of the Autoscaling Group")
 	deploy := flag.String("deploy", "plan", "Type of the execution")
+	instancePort := flag.Int64("elb-instance-port", 80, "Instance PORT")
+	elbPort := flag.Int64("elb-load-balancer-port", 80, "Load balancer PORT")
 	flag.Parse()
 
 	const MIN_INSTANCES_PER_GROUP = 2
@@ -29,6 +32,16 @@ func main() {
 
 	if *deploy == "plan" {
 		aws.PrintMessage("-------- MODE: TEST -----------------")
+		aws.PrintMessage("A VPC will be deployed VPCID:" + *vpc)
+		aws.PrintMessage("Region to use:" + *region)
+		aws.PrintMessage("Instance Type:" + *instanceType)
+		aws.PrintMessage("Load Balancer Name:" + *elbName)
+		aws.PrintMessage("Load balancer PORT:" + strconv.Itoa(int(*elbPort)))
+		aws.PrintMessage("Instance PORT:" + strconv.Itoa(int(*instancePort)))
+		aws.PrintMessage("Security Group Name:" + *sgName)
+		aws.PrintMessage("Launch Configuration Name:" + *launchConfigName)
+		aws.PrintMessage("CIDR Block:" + *cidr)
+		aws.PrintMessage("Autoscaling Group Name:" + *autoScalingName)
 		return
 	}
 
@@ -38,7 +51,7 @@ func main() {
 		EnableEc2().
 		CreateVpc(*vpc).
 		CreateSubnet(*cidr).
-		CreateLoadBalancer(*elbName, 80, 80).
+		CreateLoadBalancer(*elbName, *instancePort, *elbPort).
 		CreateSecurityGroupConfiguration(*sgName, "app platform security group", ob.Orchestrator.VpcID).
 		InputSecurityRule(ob.Orchestrator.SecurityGroup.GroupName).
 		CreateLaunchConfiguration(*ami, *instanceType, *launchConfigName).
