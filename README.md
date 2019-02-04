@@ -84,3 +84,40 @@ docker run --entrypoint /bin/bash -it app-platform
 
 -  --elb-load-balancer-port=80
     - Port of the load balancer  
+
+
+$.- Run __deploy__, the application allow us to replace the image of the launch configuration and update the autoscaling group:
+ ```
+  $ deploy ami-0ca6dfcefdde35d25 ami-0d1ed6d68d28bd833 --deploy=plan
+ ```
+
+### Parameters (both parameters are required)
+
+ - ami-0ca6dfcefdde35d25
+    - This is the AMI id of the to be replace
+
+ - ami-0d1ed6d68d28bd833
+    - This parameter is the new AMI id and the launch configuration will use this one to replace the old one
+
+
+### Parameters : optional
+In order to give more control of the replacement we will have these optional parameters
+
+ - --region=us-east-1
+    - Region where the replace will be done
+
+ - --deploy=plan or execute
+    - Type of the deployment
+        - plan: Execute as test
+        - deploy: All the steps will be executed on AWS 
+
+ - --security-group-name=app-platform
+    - Name of the security group to be loaded
+    
+ - --launch-configuration-name=app2-platform
+    - Name of the new launch configuration with the new AMI
+
+
+
+
+

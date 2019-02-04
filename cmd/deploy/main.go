@@ -2,6 +2,7 @@ package main
 
 import (
 	awsInternal "app-platform/internals/aws"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -25,16 +26,30 @@ func main() {
 		os.Exit(1)
 	}
 
+	region := flag.String("region", "us-east-1", "Region")
+	deploy := flag.String("deploy", "plan", "Choose the kind of the deploy to be executed")
+	sgName := flag.String("security-group-name", "app-platform", "Security Group Name")
+	lcNameReplace := flag.String("launch-configuration-name", "app2-platform", "Launch Configuration Name")
+
 	oldAmi := os.Args[1]
 	newAmi := os.Args[2]
-	region := "us-east-1"
 
 	awsInternal.PrintMessage("\n---------------------------------------")
 	awsInternal.PrintMessage("Deploy App has been started.........")
 
+	executeDeploy := false
+
+	if *deploy == "execute" {
+		executeDeploy = true
+	}
+
+	if executeDeploy == false {
+		awsInternal.PrintMessage("-------- TEST MODE --------------------")
+	}
+
 	ob := &awsInternal.OrchestratorBuilder{}
 	ob.
-		NewSession(region).
+		NewSession(*region).
 		EnableEc2().
 		FindInstancesByAMI(oldAmi).
 		Build()
@@ -46,6 +61,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if oldAmi == newAmi {
+		awsInternal.PrintMessage("Error: the AMI's should be different otherwise the current one cannot be replaced")
+		return
+	}
+
 	awsInternal.PrintMessage("Replacing with AMI: " + newAmi)
 
 	instance := *instances[0].Instances[0]
@@ -54,19 +74,25 @@ func main() {
 	vpcID := *instance.VpcId
 
 	autoScalingGroups := awsInternal.GetAutoScalingGroups(ob, autoScalingGroupName)
-
 	autoScalingGroup := GetAutoScalingGroup(autoScalingGroups)
-
 	launchConfigurationName := *autoScalingGroup.LaunchConfigurationName
-
 	launchConfigurations := awsInternal.LoadLaunchConfig(ob, launchConfigurationName)
-
 	launchConfiguration := launchConfigurations.LaunchConfigurations[0]
+
+	if executeDeploy == false {
+
+		awsInternal.PrintMessage("The replace will be execute by using the autoScalingGroup Name:" + autoScalingGroupName)
+		awsInternal.PrintMessage("Loading Launch Configuration Name:" + launchConfigurationName)
+		awsInternal.PrintMessage("Loading VPC ID:" + vpcID)
+		awsInternal.PrintMessage("Loading Security Group: " + *sgName)
+		awsInternal.PrintMessage("Replacing with New Launch configuration name: " + *lcNameReplace)
+		return
+	}
 
 	ob.
 		CreateVpc(vpcID).
-		CreateSecurityGroupConfiguration("app-platform", "app platform security group", ob.Orchestrator.VpcID).
-		CreateLaunchConfiguration(newAmi, *launchConfiguration.InstanceType, "app2-platform")
+		CreateSecurityGroupConfiguration(*sgName, "app platform security group", ob.Orchestrator.VpcID).
+		CreateLaunchConfiguration(newAmi, *launchConfiguration.InstanceType, *lcNameReplace)
 
 	awsInternal.UpdateAutoScalingGroup(ob, autoScalingGroupName, launchConfigurationName)
 
