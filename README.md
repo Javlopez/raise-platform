@@ -1,5 +1,7 @@
 # APP Platform
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/Javlopez/raise-platform)](https://goreportcard.com/report/github.com/Javlopez/raise-platform)
+
 ### Description
 This software contains two applications to achive work better with your infrastucture, especifically Amazon AWS
 
